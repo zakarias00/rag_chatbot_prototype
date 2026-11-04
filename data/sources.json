@@ -1,0 +1,62 @@
+[
+  {
+    "id": "venv",
+    "path": "data/raw/venv.md",
+    "title": "venv — Creation of virtual environments",
+    "source_url": "https://docs.python.org/3.12/library/venv.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/library/venv.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  },
+  {
+    "id": "pathlib",
+    "path": "data/raw/pathlib.md",
+    "title": "pathlib — Object-oriented filesystem paths",
+    "source_url": "https://docs.python.org/3.12/library/pathlib.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/library/pathlib.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  },
+  {
+    "id": "json",
+    "path": "data/raw/json.md",
+    "title": "json — JSON encoder and decoder",
+    "source_url": "https://docs.python.org/3.12/library/json.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/library/json.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  },
+  {
+    "id": "csv",
+    "path": "data/raw/csv.md",
+    "title": "csv — CSV File Reading and Writing",
+    "source_url": "https://docs.python.org/3.12/library/csv.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/library/csv.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  },
+  {
+    "id": "logging",
+    "path": "data/raw/logging.md",
+    "title": "logging — Logging facility for Python",
+    "source_url": "https://docs.python.org/3.12/library/logging.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/library/logging.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  },
+  {
+    "id": "errors",
+    "path": "data/raw/errors.md",
+    "title": "Errors and Exceptions",
+    "source_url": "https://docs.python.org/3.12/tutorial/errors.html",
+    "source_revision": "https://github.com/python/cpython/blob/v3.12.8/Doc/tutorial/errors.rst",
+    "python_version": "3.12.8",
+    "retrieved_at": "2026-11-04",
+    "license": "Python Software Foundation License Agreement; see data/PYTHON-LICENSE.txt"
+  }
+]

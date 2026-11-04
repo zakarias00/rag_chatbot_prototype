@@ -1,4 +1,4 @@
-"""Streamlit entry point for the project skeleton."""
+"""Streamlit entry point for the project."""
 
 import streamlit as st
 
