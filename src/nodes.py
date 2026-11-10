@@ -4,7 +4,10 @@ import math
 import re
 from typing import Any
 
+from numpy import minimum
+
 from src.generation.base import AnswerGenerator
+from src.rag.querying import evidence_facets
 from src.state import AgentState
 
 NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
@@ -16,16 +19,7 @@ DOC_HINT = re.compile(r"\b(?:python|documentation|docs?|json|pathlib|venv|csv|lo
 DOC_REQUEST = re.compile(r"\b(?:how\s+(?:can|do|does|to)|what\s+(?:is|does|are)|explain|describe|documentation|configure|using|write\s+logs?)\b", re.I)
 TOKEN = re.compile(r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*", re.I)
 STOP = frozenset("a also an and are as at be by calculate can could describe difference do does explain for from how i in is it me my of on or please show tell that the their this to use what when where which why with work would you your python documentation docs doc about question using between information".split())
-OUT_OF_SCOPE = re.compile(
-    r"\b(?:my|our)\s+"
-    r"(?:company|organisation|organization)(?:'s)?\b"
-    r"|"
-    r"\b(?:my|our)\s+virtual\s+environment\b"
-    r".*\b(?:now|currently|right now)\b"
-    r"|"
-    r"\b(?:api\s+rate\s+limit|current\s+price)\b",
-    re.I,
-)
+
 
 
 def _event(state: AgentState, node: str, message: str) -> list[dict]:
@@ -67,28 +61,58 @@ def _parse_calculation(question: str) -> tuple[dict | None, tuple[int, int] | No
 def _terms(text: str) -> set[str]:
     return {token.lower() for token in TOKEN.findall(text) if token.lower() not in STOP and len(token) > 1}
 
+_UNSUPPORTED = re.compile(
+    r"\b(?:my|our)\s+(?:company|organisation|organization)(?:\'s)?\b"
+    r"|\b(?:current|latest|today\'s)\s+(?:price|pricing|rate\s+limit)\b"
+    r"|\b(?:api\s+rate\s+limit|cloud\s+service\s+price)\b"
+    r"|\b(?:my|our)\s+virtual\s+environment\b.*\b(?:currently|right\s+now)\b",
+    re.I,
+)
+
+
+def _matches_facet(facet: str, document: dict) -> bool:
+    """A lexical relevance heuristic, not a factual entailment classifier."""
+    text = " ".join(str(document.get(key, "")) for key in ("title", "section", "text"))
+    text = re.sub(r"\\([_*])", r"\1", text)
+    normalized = text.lower().replace("_", " ").replace(".", " ")
+    symbols = re.findall(r"(?<![\w.])([A-Za-z_]\w*\.[A-Za-z_]\w*)(?![\w.])", facet)
+    if symbols:
+        if not all(re.search(rf"(?<![\w.]){re.escape(name)}(?![\w.])", text, re.I) for name in symbols):
+            return False
+    module = re.search(r"\b(?:with|using|via)\s+(pathlib|json|venv|csv|logging)\b(?!\.)", facet, re.I)
+    if module and document.get("document_id", "").lower() != module.group(1).lower():
+        return False
+    terms = _terms(facet)
+    if not terms:
+        return False
+    matched = sum(
+        bool(re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", text, re.I))
+        or ("." not in term and bool(re.search(rf"\b{re.escape(term)}\b", normalized)))
+        for term in terms
+    )
+    minimum = 1 if len(terms) <= 2 else 2
+    return (
+        matched >= minimum
+        and matched / len(terms) >= 0.40
+    )
+
 
 def _supported_documents(query: str, documents: list[dict]) -> list[dict]:
-    """Use a conservative lexical guard; matching is not proof of correctness."""
-    if OUT_OF_SCOPE.search(query):
+    """Keep chunks relevant to at least one independently answerable facet."""
+    if _UNSUPPORTED.search(query):
         return []
-    terms = _terms(query)
-    if not terms:
-        return []
-    selected = []
-    for document in documents:
-        searchable = " ".join(str(document.get(key, "")) for key in ("title", "section", "text")).lower()
-        normalized = searchable.replace("_", " ").replace(".", " ")
-        matched = sum(bool(re.search(rf"(?<![a-z0-9_]){re.escape(term)}(?![a-z0-9_])", searchable)) or ("." not in term and bool(re.search(rf"\b{re.escape(term)}\b", normalized))) for term in terms)
-        # Do not use a write-only result to answer a request about reading, or vice versa.
-        if any(action in terms and not re.search(rf"\b{action}\b", normalized) for action in ("read", "write")):
-            continue
-        if (
-            matched / len(terms) >= 0.30
-            and document.get("score", 0.0) >= 0.15
-        ):
-            selected.append(document)
-    return selected
+    facets = evidence_facets(query)
+    return [document for document in documents
+            if any(_matches_facet(facet, document) for facet in facets)]
+
+
+def _covered_facets(query: str, documents: list[dict]) -> tuple[int, int]:
+    facets = evidence_facets(query)
+    return (
+        sum(any(_matches_facet(facet, doc) for doc in documents) for facet in facets),
+        len(facets),
+    )
+
 
 def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenerator) -> dict[str, Any]:
     def plan(state: AgentState) -> dict:
@@ -101,7 +125,6 @@ def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenera
             calculation, span = None, None
         if calculation:
             remaining = question[:span[0]] + " " + question[span[1]:]
-            # Do not silently calculate only part of a longer expression.
             if re.search(r"\d", remaining) or re.search(r"[+*/×-]", remaining):
                 calculation = None
 
@@ -114,6 +137,8 @@ def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenera
             return {"subtasks": [], "calculation_request": None, "calculation_result": None, "documents": [], "citations": [], "generation_backend": None, "generation_fallback_reason": None, "search_query": question, "retry_count": 0, "evidence_sufficient": False, "status": "clarification", "answer": "Please provide one complete calculation with two numbers and an operation, for example 12 * 7.", "trace": _event(state, "plan", "Calculation input is incomplete or unsupported.")}
         else:
             tasks = ["search_documentation"]
+        if calculation and "search_documentation" in tasks:
+            remaining = re.sub(r"\b(?:and\s+what\s+is|and\s+calculate)\s*\??\s*$", "", remaining, flags=re.I).strip()
         search_query = remaining if calculation and "search_documentation" in tasks else question
         return {"subtasks": tasks, "calculation_request": calculation, "calculation_result": None, "documents": [], "citations": [], "generation_backend": None, "generation_fallback_reason": None, "search_query": search_query, "documentation_question": search_query if "search_documentation" in tasks else None, "retry_count": 0, "evidence_sufficient": False, "search_error": None, "status": "planned", "answer": "", "trace": _event(state, "plan", "Planned: " + ", ".join(tasks))}
 
@@ -132,26 +157,22 @@ def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenera
         return {"documents": documents, "search_error": None, "trace": _event(state, "retrieve", f"Retrieved {len(documents)} candidate chunks.")}
 
     def assess_evidence(state: AgentState) -> dict:
-        documents = _supported_documents(state["search_query"], state["documents"])
-        return {"documents": documents, "evidence_sufficient": bool(documents), "trace": _event(state, "assess_evidence", f"{len(documents)} chunks passed the lexical evidence check.")}
+        query = state.get("documentation_question") or state["search_query"]
+        documents = _supported_documents(query, state["documents"])
+        covered, needed = _covered_facets(query, documents)
+        sufficient = covered == needed and bool(documents)
+        return {"documents": documents, "evidence_sufficient": sufficient,
+                "trace": _event(state, "assess_evidence",
+                                f"{covered}/{needed} question facets supported by {len(documents)} chunks (heuristic).") }
 
     def route_evidence(state: AgentState) -> str:
         if not state["evidence_sufficient"]:
             if state["retry_count"] < 1:
                 return "refine_query"
-
-            if "calculate" in state["subtasks"]:
-                return "calculate"
-
-            return "abstain"
-
-        if "calculate" in state["subtasks"]:
-            return "calculate"
-
-        return "generate_answer"
+            return "calculate" if "calculate" in state["subtasks"] else "abstain"
+        return "calculate" if "calculate" in state["subtasks"] else "generate_answer"
 
     def refine_query(state: AgentState) -> dict:
-        # Preserve symbols such as json.dumps; discard question filler.
         terms = [word for word in TOKEN.findall(state["search_query"]) if word.lower() not in STOP]
         refined = " ".join(terms) or state["question"]
         return {"search_query": refined, "retry_count": state["retry_count"] + 1, "trace": _event(state, "refine_query", "Refined the search query for one retry.")}
@@ -168,7 +189,7 @@ def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenera
         return "finalize" if state["status"] == "clarification" else "generate_answer"
 
     def generate_answer(state: AgentState) -> dict:
-        documents = state.get("documents", [])
+        documents = state.get("documents", []) if state.get("evidence_sufficient", True) else []
         citations = []
         parts = []
         fallback_reason = None
@@ -195,35 +216,16 @@ def create_nodes(search_tool: Any, calculator_tool: Any, generator: AnswerGenera
             calculation = state["calculation_result"]
             unit = state["calculation_request"].get("unit", "")
             parts.append(f"Calculation ({calculation['operation']}): {calculation['result']}" + (f" {unit}" if unit else ""))
-        
-
-        partial = (
-            "search_documentation" in state["subtasks"]
-            and not documents
-        )
-
-        if partial:
-            parts.insert(
-                0,
-                "I could not verify the documentation part "
-                "of this question using the available sources."
-            )
-
         message = f"Prepared an answer using {backend}."
-
         if fallback_reason:
             message += f" Fallback: {fallback_reason}"
-
-        return {
-            "answer": "\n\n".join(parts),
-            "citations": citations,
-            "status": "partial" if partial else "answered",
-            "generation_backend": backend,
-            "generation_fallback_reason": fallback_reason,
-            "trace": _event(
-                state, "generate_answer", message
-            ),
-        }
+        missing_docs = "search_documentation" in state["subtasks"] and not state.get("evidence_sufficient", False)
+        if missing_docs:
+            parts.insert(0, "The documentation part could not be verified from the available sources.")
+        return {"answer": "\n\n".join(parts), "citations": citations,
+                "status": "partial" if missing_docs else "answered",
+                "generation_backend": backend, "generation_fallback_reason": fallback_reason,
+                "trace": _event(state, "generate_answer", message)}
 
     def abstain(state: AgentState) -> dict:
         answer = "The documentation search failed after a retry. Please check the index and try again." if state.get("search_error") else "I could not find sufficient supporting evidence in the available Python documentation."

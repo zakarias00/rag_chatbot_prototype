@@ -33,19 +33,20 @@ def show_result(result: dict) -> None:
     status = result.get("status")
     if status == "abstained":
         st.caption("No supported answer found")
-    elif status == "partial":
-        st.caption(
-            "Partial answer: some parts could not be verified"
-        )
     elif status == "clarification":
         st.caption("More information needed")
+    elif status == "partial":
+        st.caption("Partial response: some evidence was unavailable")
     st.markdown(result.get("answer", "No answer was returned."))
     backend = result.get("generation_backend")
     if backend:
         st.caption(f"Answer method: {backend}")
     fallback_reason = result.get("generation_fallback_reason")
     if fallback_reason:
-        st.warning(f"Ollama was unavailable; using the extractive fallback. {fallback_reason}")
+        st.warning(
+            f"Ollama generation failed or was rejected; "
+            f"using the extractive fallback. {fallback_reason}"
+        )
 
     with st.expander("Sources"):
         citations = result.get("citations", [])

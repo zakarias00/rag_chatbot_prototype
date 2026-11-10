@@ -1,6 +1,7 @@
 from typing import TypedDict
 
 
+"""Internal state shared by the RAG agent and its subgraphs."""
 class AgentState(TypedDict, total=False):
     question: str
     subtasks: list[str]

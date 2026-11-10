@@ -14,11 +14,10 @@ from src.generation.base import AnswerGenerator
 @dataclass(frozen=True)
 class Settings:
     """Generation settings, suitable for caching alongside the loaded index."""
-
     generator: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen3:14b"
-    ollama_timeout_seconds: float = 120.0
+    ollama_model: str = "qwen3:1.7b"
+    ollama_timeout_seconds: float = 35.0
 
 
 def load_settings() -> Settings:
@@ -26,7 +25,7 @@ def load_settings() -> Settings:
     generator = os.getenv("RAG_GENERATOR", "ollama").strip().lower()
     if generator not in {"ollama", "dummy"}:
         raise ValueError("RAG_GENERATOR must be 'ollama' or 'dummy'")
-
+    
     base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
     parsed = urlsplit(base_url)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname
@@ -34,11 +33,13 @@ def load_settings() -> Settings:
             or parsed.query or parsed.fragment):
         raise ValueError("OLLAMA_BASE_URL must be an HTTP(S) base URL without credentials, query, or fragment")
 
-    model = os.getenv("OLLAMA_MODEL", "qwen3:14b").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen3:1.7b").strip()
+    
+    timeout = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "35"))
     if not model:
         raise ValueError("OLLAMA_MODEL must not be empty")
     try:
-        timeout = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+        timeout = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "35"))
     except ValueError as exc:
         raise ValueError("OLLAMA_TIMEOUT_SECONDS must be a positive number") from exc
     if not math.isfinite(timeout) or timeout <= 0:
