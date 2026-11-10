@@ -1,109 +1,108 @@
+"""Small, deterministic multi-query retriever for the Python documentation."""
 from __future__ import annotations
 
 import re
 from typing import Any
 
-_SYMBOL = re.compile(r"(?<![\w.])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)(?![\w.])")
-_CLAUSE = re.compile(
-    r"\s+and\s+(?=(?:parse|log|activate|read|write|create|handle|explain|call|" 
-    r"show|return|what|how|when|where|why|can|does|do)\b)", re.I,
+# Preserve dotted Python names such as json.dumps and Path.read_text.
+API_NAME = re.compile(r"(?<![\w.])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+)(?![\w.])")
+CLAUSE_BREAK = re.compile(
+    r"\s+and\s+(?=(?:parse|log|activate|read|write|create|handle|explain|"
+    r"call|show|return|what|how|when|where|why|can|does|do)\b)", re.I,
 )
-_EXPANSIONS = {"create": "creating", "activate": "activation", "read": "reading", "write": "writing"}
+MODULE_HINT = re.compile(r"\b(?:with|using|via)\s+(pathlib|json|venv|csv|logging)\b(?!\.)", re.I)
+
+
+def split_needs(question: str) -> list[str]:
+    """Split questions that ask for two independently answerable actions."""
+    return [part.strip(" ,?.") for part in CLAUSE_BREAK.split(question)]
+
+
+def evidence_facets(question: str) -> list[str]:
+    """Return the parts for which the answer needs supporting documents."""
+    clauses = split_needs(question)
+    if len(clauses) > 1:
+        return clauses
+    names = list(dict.fromkeys(API_NAME.findall(question)))
+    return names if len(names) > 1 else [question]
 
 
 def search_facets(question: str) -> list[str]:
-    """Split a question into multiple search facets for diversified retrieval."""
-    question = " ".join(question.split()).strip()
+    """Search the full question plus smaller queries for multi-part questions."""
+    question = " ".join(question.split())
     if not question:
         return []
-    result = [question]
-    clauses = [part.strip(" ,?.") for part in _CLAUSE.split(question)]
+
+    clauses = split_needs(question)
+    names = list(dict.fromkeys(API_NAME.findall(question)))
+    queries = [question]
     if len(clauses) > 1:
-        result.extend(clause for clause in clauses if len(clause.split()) > 1)
-    names = list(dict.fromkeys(_SYMBOL.findall(question)))
-    # Single-function questions do not need a redundant second search.
-    if len(names) > 1 or len(clauses) > 1:
-        result.extend(names)
-    # Lexical expansion for inflected wording, not an answer lookup.
+        queries.extend(part for part in clauses if len(part.split()) > 1)
+    if len(clauses) > 1 or len(names) > 1:
+        queries.extend(names)
     if re.search(r"\bcreate\b", question, re.I) and re.search(r"\bvenv|virtual environment\b", question, re.I):
-        result.append("venv creating virtual environments")
-    return list(dict.fromkeys(result))[:7]
+        queries.append("venv creating virtual environments")
+
+    return list(dict.fromkeys(queries))[:7]
 
 
-def _signature_boost(document: dict[str, Any], query: str) -> float:
-    """Boost score if the document contains a function signature matching the query."""
-    symbols = set(_SYMBOL.findall(query))
-    content = document.get("text", "")
-    boost = 0.0
-    for symbol in symbols:
-        if re.search(rf"(?m)^\s*`?{re.escape(symbol)}\s*\(", content):
-            boost += 0.25
-        elif re.search(rf"(?<![\w.]){re.escape(symbol)}\s*\(", content):
-            boost += 0.04
-    # If a clause explicitly says "with pathlib" or "using csv", favor that
-    # module over other modules mentioned only as a file/data format.
-    target = re.search(r"\b(?:with|using|via)\s+(pathlib|json|venv|csv|logging)\b(?!\.)", query, re.I)
-    if target and document.get("document_id", "").lower() == target.group(1).lower():
-        boost += 0.35
+def ranking_bonus(document: dict, query: str) -> float:
+    """Give a modest preference to API definitions and the named module."""
+    text = document.get("text", "")
+    bonus = 0.0
+    for name in set(API_NAME.findall(query)):
+        if re.search(rf"(?m)^\s*`?{re.escape(name)}\s*\(", text):
+            bonus += 0.25
+        elif re.search(rf"(?<![\w.]){re.escape(name)}\s*\(", text):
+            bonus += 0.04
+
+    module = MODULE_HINT.search(query)
+    if module and document.get("document_id", "").lower() == module[1].lower():
+        bonus += 0.35
     if re.search(r"\bcreate\b", query, re.I) and re.search(r"\bcreat(?:e|es|ing|ion)\b", document.get("section", ""), re.I):
-        boost += 0.12
-    return min(boost, 0.65)
+        bonus += 0.12
+    return min(bonus, 0.65)
 
 
 def retrieve_diversified(index: Any, question: str, *, k: int = 5, pool: int = 15) -> list[dict]:
-    """Retrieve a diversified set of evidence chunks for a question."""
+    """Search several queries and return up to k unique, diverse chunks.
+
+    `score` is the original TF-IDF similarity. `ranking_score` is only used
+    to choose which chunks to show; it is not a confidence probability.
+    """
     if not question.strip():
         raise ValueError("Question must not be empty")
     if k < 1 or pool < k:
         raise ValueError("k must be positive and pool must be >= k")
-    facets = search_facets(question)
-    merged: dict[str, dict] = {}
-    by_facet: list[list[tuple[str, float]]] = []
-    for facet_index, facet in enumerate(facets):
-        hits = index.search(facet, k=pool)
-        ids = []
-        for item in hits:
-            cid = item["chunk_id"]
-            facet_score = item["score"] + _signature_boost(item, facet) + 0.02 / (len(ids) + 1)
-            ids.append((cid, facet_score))
-            if cid not in merged:
-                merged[cid] = {**item, "search_facets": [], "ranking_score": 0.0}
-            existing = merged[cid]
-            existing["score"] = max(existing["score"], item["score"])
-            existing["search_facets"].append(facet_index)
-            # Extra credit for a method definition and relative query rank.
-            rank_score = facet_score
-            existing["ranking_score"] = max(existing["ranking_score"], rank_score)
-        by_facet.append(ids)
 
-    def order_key(cid: str) -> tuple[float, float, str]:
-        doc = merged[cid]
-        return (-doc["ranking_score"], -doc["score"], cid)
+    found: dict[str, dict] = {}
+    per_query: list[list[tuple[str, float]]] = []
+    for query_number, query in enumerate(search_facets(question)):
+        ranked = []
+        for position, hit in enumerate(index.search(query, k=pool), start=1):
+            chunk_id = hit["chunk_id"]
+            rank = hit["score"] + ranking_bonus(hit, query) + 0.02 / position
+            ranked.append((chunk_id, rank))
 
-    chosen: list[str] = []
-    
-    for facet_id in range(1, len(facets)):
-        available = [(cid, score) for cid, score in by_facet[facet_id] if cid not in chosen]
-        if not available or len(chosen) == k:
+            if chunk_id not in found:
+                found[chunk_id] = {**hit, "search_facets": [], "ranking_score": 0.0}
+            result = found[chunk_id]
+            result["score"] = max(result["score"], hit["score"])
+            result["ranking_score"] = max(result["ranking_score"], rank)
+            result["search_facets"].append(query_number)
+        per_query.append(ranked)
+
+    selected: list[str] = []
+    # Reserve one result per additional query before filling by global rank.
+    for candidates in per_query[1:]:
+        available = [(chunk_id, rank) for chunk_id, rank in candidates if chunk_id not in selected]
+        if available and len(selected) < k:
+            selected.append(max(available, key=lambda item: item[1])[0])
+
+    remaining = sorted(found, key=lambda cid: (-found[cid]["ranking_score"], -found[cid]["score"], cid))
+    for chunk_id in remaining:
+        if len(selected) == k:
             break
-        chosen.append(max(available, key=lambda pair: pair[1])[0])
-    for cid in sorted(merged, key=order_key):
-        if len(chosen) >= k:
-            break
-        if cid not in chosen:
-            chosen.append(cid)
-    return [merged[cid] for cid in chosen]
-
-
-def evidence_facets(question: str) -> list[str]:
-    """Return a list of search facets for evidence retrieval, or the original question."""
-    question = " ".join(question.split()).strip()
-    clauses = [part.strip(" ,?.") for part in _CLAUSE.split(question)]
-    if len(clauses) > 1:
-        stopwords = {"what", "when", "where", "how", "is", "are", "do", "does", "it", "the", "a", "an", "and", "can"}
-        meaningful = [part for part in clauses if
-                      any(token not in stopwords for token in re.findall(r"[a-z]+", part.lower()))]
-        if meaningful:
-            return meaningful
-    symbols = list(dict.fromkeys(_SYMBOL.findall(question)))
-    return symbols if len(symbols) > 1 else [question]
+        if chunk_id not in selected:
+            selected.append(chunk_id)
+    return [found[chunk_id] for chunk_id in selected]
