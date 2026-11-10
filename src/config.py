@@ -13,7 +13,6 @@ from src.generation.base import AnswerGenerator
 
 @dataclass(frozen=True)
 class Settings:
-    """Generation settings, suitable for caching alongside the loaded index."""
     generator: str = "ollama"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:1.7b"
@@ -35,7 +34,6 @@ def load_settings() -> Settings:
 
     model = os.getenv("OLLAMA_MODEL", "qwen3:1.7b").strip()
     
-    timeout = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "35"))
     if not model:
         raise ValueError("OLLAMA_MODEL must not be empty")
     try:
