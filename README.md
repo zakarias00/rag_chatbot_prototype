@@ -46,19 +46,50 @@ It allows retrieval and routing to be evaluated independently from LLM generatio
 
 **Design trade-off:** TF-IDF and a deterministic baseline keep the prototype lightweight, explainable, and reproducible. Ollama can produce more natural answers, but needs local compute and is evaluated separately from the deterministic baseline.
 
-## Run locally
+## Installation and Setup
 
-Requirements: **Python 3.12**. Run the following commands from the repository root after cloning it:
+### 1. Clone the repository
+
+Clone the project from GitHub and navigate into its directory:
+
+```bash
+git clone https://github.com/zakarias00/rag_chatbot_prototype.git
+cd rag_chatbot_prototype
+```
+
+### 2. Create and activate a virtual environment
+
+Python 3.12 is recommended.
 
 ```bash
 python3.12 -m venv .venv
-source .venv/bin/activate             # Windows: .venv\Scripts\activate
-python -m pip install -e '.[dev]'
-
-# Build the documentation corpus and search index
-python -m src.rag.ingestion
-python -m src.rag.index build
+source .venv/bin/activate
 ```
+
+### 3. Install dependencies
+
+```bash
+pip install -e .
+```
+
+### 4. Prepare the documentation index
+
+```bash
+python -m src.rag.ingestion
+python -m src.rag.index
+```
+
+### 5. Run the application
+
+Start the Streamlit application using the deterministic generator (no external LLM required):
+
+```bash
+RAG_GENERATOR=dummy streamlit run app.py
+```
+
+Open `http://localhost:8501` in your browser.
+
+There are two options for running the application: a deterministic mode that does not require Ollama, and a local Ollama model for more natural language generation.
 
 ### Option A — deterministic mode (no Ollama required)
 
