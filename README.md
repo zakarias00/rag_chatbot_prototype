@@ -1,6 +1,10 @@
 # Agentic RAG Chatbot — Python Documentation Assistant
 
-A small **LangGraph-based agentic RAG prototype** that answers questions about selected Python 3.12 documentation and performs simple calculations. Built as a medior AI Engineer take-home project, it uses local documentation and **does not require a paid API**.
+Python documentation contains a large amount of technical information spread across different modules. Finding an answer to a question involving multiple APIs can require navigating several documentation pages.
+
+The goal of this project is to build a chatbot that retrieves relevant documentation, combines information from multiple sources, and provides evidence-backed answers. It also handles simple calculations and recognizes when there is insufficient information to answer.
+
+The final solution is a small **LangGraph-based agentic RAG prototype** that answers questions about selected Python 3.12 documentation and performs simple calculations. Built as a medior AI Engineer take-home project, it uses local documentation and **does not require a paid API**.
 
 ## What it does
 
@@ -30,6 +34,15 @@ A separate three-node RAG subgraph handles documentation search and evidence sel
 | `data/raw/`, `data/sources.json` | Documentation excerpts and source metadata |
 | `tests/` | Automated unit and integration tests |
 | `evaluation/` | Question datasets, functional evaluator, load test, reports |
+
+**Why agentic RAG?**
+A basic RAG pipeline retrieves documents and generates an answer. In this project, some questions require multiple retrieval steps, calculations, or a decision to abstain. LangGraph provides explicit control over these different execution paths.
+
+**Why TF-IDF?** 
+The documentation corpus is relatively small, so TF-IDF offers a lightweight, deterministic solution without requiring an embedding model or external API.
+
+**Why a dummy generator?** 
+It allows retrieval and routing to be evaluated independently from LLM generation. Ollama is available as an optional backend for more natural-language answers.
 
 **Design trade-off:** TF-IDF and a deterministic baseline keep the prototype lightweight, explainable, and reproducible. Ollama can produce more natural answers, but needs local compute and is evaluated separately from the deterministic baseline.
 
@@ -139,6 +152,60 @@ python -u -m evaluation.run_loaded_eval \
 ```
 
 The script prints a summary after the run and writes the detailed JSON report.
+
+The load test measures 100 sequential requests using the deterministic backend. It excludes model inference, Streamlit rendering, and HTTP overhead. Component timings are collected for retrieval, calculation, generation, and graph orchestration. The measured timings help identify the most expensive operations and suggest where optimizations would be most beneficial.
+
+## Performance Evaluation
+
+A load test was performed to measure the execution time and stability of the Agentic RAG workflow.
+
+### Test Setup
+
+- **Requests:** 100 (after 10 warmup requests)
+- **Concurrency:** 1 (sequential execution)
+- **Dataset:** 10 different questions repeated throughout the test
+- **Generator:** Deterministic dummy generator (no Ollama)
+- **Environment:** Python 3.12.5, macOS ARM64
+
+The test measures LangGraph execution directly using `graph.invoke()`. Application startup, Streamlit rendering, and HTTP overhead are excluded.
+
+### Results
+
+| Metric | Result |
+|---|---:|
+| Successful requests | 100/100 |
+| Failed requests | 0 |
+| Average response time | 4.23 ms |
+| 95th percentile response time (p95) | 9.88 ms |
+| Maximum response time | 26.19 ms |
+| Throughput | 235.94 requests/second |
+
+Average component execution times:
+
+| Component | Mean execution time |
+|---|---:|
+| Document retrieval | 2.68 ms |
+| Calculator | 0.40 ms |
+| Dummy generation | 0.56 ms |
+| Other processing (including LangGraph) | 1.58 ms |
+
+### Observations and Bottlenecks
+
+All requests completed successfully, including documentation questions, calculations, combined questions, and unsupported queries.
+
+Document retrieval was the most expensive individual component. This is expected because it involves searching and ranking multiple document chunks. Unsupported questions can require an additional retrieval attempt before the system decides to abstain.
+
+Calculation and deterministic answer generation were relatively inexpensive.
+
+Possible optimizations include caching repeated retrieval queries and reducing unnecessary retrieval attempts.
+
+### Limitations
+
+The test uses a lightweight deterministic generator, so the results do not represent actual LLM inference latency. Ollama-based generation would introduce additional processing time and memory requirements.
+
+Since requests were executed sequentially, the test also does not measure performance under concurrent user traffic.
+
+Success was defined as producing the expected workflow status without retrieval errors; it does not measure the factual correctness or completeness of generated answers.
 
 ## Repository notes
 
