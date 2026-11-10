@@ -5,16 +5,15 @@ import json
 import math
 from pathlib import Path
 from typing import TypedDict
-import re
 
 from langgraph.graph import END, START, StateGraph
 
 from src.rag.index import DEFAULT_CHUNKS, DEFAULT_INDEX, DocumentationIndex
+from src.rag.querying import retrieve_diversified
 
 
 class RagState(TypedDict, total=False):
     """Input, intermediate results and output shared by the retrieval nodes."""
-
     query: str
     search_query: str
     candidates: list[dict]
@@ -30,12 +29,7 @@ class RagOutput(TypedDict):
 
 
 def create_rag_subgraph(index: DocumentationIndex, *, k: int = 5, min_score: float = 0.0):
-    """Compile a retrieval graph using an already loaded documentation index.
-
-    ``min_score`` is a cosine similarity cutoff in [0, 1], not a confidence
-    probability or proof that a question can be answered. A zero cutoff still
-    excludes zero-scoring candidates. The index supplies at most ``k`` results.
-    """
+    """Compile a retrieval graph using an already loaded documentation index."""
     if isinstance(k, bool) or not isinstance(k, int) or k < 1:
         raise ValueError("k must be a positive integer")
     if isinstance(min_score, bool) or not isinstance(min_score, (int, float)) or not math.isfinite(min_score) or not 0 <= min_score <= 1:
@@ -49,33 +43,7 @@ def create_rag_subgraph(index: DocumentationIndex, *, k: int = 5, min_score: flo
         return {"search_query": " ".join(query.split())}
 
     def retrieve_chunks(state: RagState) -> dict:
-        query = state["search_query"]
-
-        subqueries = re.split(
-            r",\s+and\s+(?=(?:when|how|what|can|does|do)\b)",
-            query,
-            flags=re.I,
-        )
-
-        results = {}
-
-        for subquery in subqueries:
-            for document in index.search(subquery, k=k):
-                chunk_id = document["chunk_id"]
-
-                if (
-                    chunk_id not in results
-                    or document["score"] > results[chunk_id]["score"]
-                ):
-                    results[chunk_id] = document
-
-        candidates = sorted(
-            results.values(),
-            key=lambda doc: doc["score"],
-            reverse=True,
-        )
-
-        return {"candidates": candidates}
+        return {"candidates": retrieve_diversified(index, state["search_query"], k=k, pool=max(15, k))}
 
     def select_evidence(state: RagState) -> dict:
         selected, seen = [], set()
@@ -88,7 +56,7 @@ def create_rag_subgraph(index: DocumentationIndex, *, k: int = 5, min_score: flo
             selected.append(candidate)
         return {"documents": selected}
 
-    builder = StateGraph(RagState, output=RagOutput)
+    builder = StateGraph(RagState, output_schema=RagOutput)
     builder.add_node("prepare_query", prepare_query)
     builder.add_node("retrieve_chunks", retrieve_chunks)
     builder.add_node("select_evidence", select_evidence)

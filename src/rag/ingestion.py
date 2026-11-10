@@ -44,11 +44,7 @@ def sections(text: str, title: str):
 
 
 def split_text(text: str, max_words: int = 400, overlap: int = 40):
-    """Split on word boundaries, preserving whitespace and fenced code blocks.
-
-    A fenced block longer than max_words remains intact. Indented (unfenced)
-    blocks may cross chunk boundaries, so fenced blocks are preferred.
-    """
+    """Split on word boundaries, preserving whitespace and fenced code blocks. """
     if max_words <= 0 or not 0 <= overlap < max_words:
         raise ValueError("max_words must be positive and overlap must be in [0, max_words)")
     words = list(WORD.finditer(text))
@@ -92,7 +88,8 @@ def split_text(text: str, max_words: int = 400, overlap: int = 40):
 
 def ingest(manifest_path: Path, output_path: Path, project_root: Path = PROJECT_ROOT,
            max_words: int = 400, overlap: int = 40) -> int:
-    """Create chunks for every manifest source; paths are relative to project_root."""
+    """Read a source manifest, split each document into chunks, and write JSONL output."""
+
     manifest_path, output_path, root = Path(manifest_path), Path(output_path), Path(project_root).resolve()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(manifest, list) or not manifest:
