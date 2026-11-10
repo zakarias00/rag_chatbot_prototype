@@ -9,9 +9,10 @@ description = "An agentic RAG chatbot prototype project"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "langchain-core==0.3.37",
-    "langgraph==0.2.76",
-    "scikit-learn==1.6.1",
+    "langchain-core==1.7.5",
+    "langgraph==1.2.19",
+    "requests==2.34.2",
+    "scikit-learn==1.9.1",
     "streamlit==1.42.2",
 ]
 
@@ -19,4 +20,6 @@ dependencies = [
 dev = ["pytest==8.3.4"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["src*"]
+namespaces = true
