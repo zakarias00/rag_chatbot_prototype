@@ -1,0 +1,11 @@
+.git
+.venv
+.pytest_cache
+**/__pycache__
+**/*.pyc
+*.egg-info
+build
+dist
+data/processed
+.streamlit/secrets.toml
+evaluation/results
