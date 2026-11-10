@@ -16,7 +16,6 @@ class GenerationResult:
 class AnswerGenerator(Protocol):
     def generate(self, question: str, documents: list[dict]) -> GenerationResult:
         """Answer using the supplied retrieved documents."""
-        ...
 
 
 class OllamaUnavailable(Exception):
